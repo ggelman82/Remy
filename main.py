@@ -181,64 +181,6 @@ def home():
 </body>
 </html>
 """
-def home():
-    return """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Remy</title>
-</head>
-<body style="font-family: sans-serif; text-align: center; padding: 40px;">
-    <h1>Remy</h1>
-    <button
-        id="talk"
-        style="font-size: 32px; padding: 30px; border-radius: 20px;"
-    >
-        🎙️ Talk to Remy
-    </button>
-
-    <p id="status"></p>
-
-    <script>
-        const button = document.getElementById("talk");
-        const status = document.getElementById("status");
-
-        button.onclick = () => {
-            const SpeechRecognition =
-                window.SpeechRecognition || window.webkitSpeechRecognition;
-
-            if (!SpeechRecognition) {
-                status.innerText = "Voice recognition is not supported in this browser.";
-                return;
-            }
-
-            const recognition = new SpeechRecognition();
-            recognition.lang = "en-US";
-
-            status.innerText = "Listening...";
-            recognition.start();
-
-            recognition.onresult = async (event) => {
-                const text = event.results[0][0].transcript;
-                status.innerText = "You said: " + text;
-
-                const response = await fetch("/capture", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({text: text})
-                });
-
-                const result = await response.json();
-                status.innerText = "✓ " + result.task;
-            };
-        };
-    </script>
-</body>
-</html>
-"""
-
-
 @app.post("/capture")
 def capture(capture: Capture):
     response = client.messages.create(
