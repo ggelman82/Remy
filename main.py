@@ -46,6 +46,148 @@ def home():
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Remy</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: auto;
+            padding: 24px;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        #talk {
+            display: block;
+            width: 100%;
+            font-size: 28px;
+            padding: 24px;
+            border-radius: 18px;
+            margin-bottom: 18px;
+        }
+
+        #status {
+            text-align: center;
+            min-height: 30px;
+        }
+
+        .task {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            padding: 16px 4px;
+            border-bottom: 1px solid #ddd;
+            font-size: 20px;
+        }
+
+        .task input {
+            width: 24px;
+            height: 24px;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Remy</h1>
+
+    <button id="talk">🎙️ Talk to Remy</button>
+
+    <p id="status"></p>
+
+    <h2>To Do</h2>
+    <div id="tasks">Loading...</div>
+
+    <script>
+        const button = document.getElementById("talk");
+        const status = document.getElementById("status");
+        const tasks = document.getElementById("tasks");
+
+        async function loadTasks() {
+            const response = await fetch("/items");
+            const items = await response.json();
+
+            tasks.innerHTML = "";
+
+            if (items.length === 0) {
+                tasks.innerHTML = "<p>Nothing to do. 🎉</p>";
+                return;
+            }
+
+            for (const item of items) {
+                const row = document.createElement("div");
+                row.className = "task";
+
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+
+                const label = document.createElement("span");
+                label.innerText = item.task;
+
+                checkbox.onchange = async () => {
+                    await fetch(`/items/${item.id}/complete`, {
+                        method: "POST"
+                    });
+
+                    loadTasks();
+                };
+
+                row.appendChild(checkbox);
+                row.appendChild(label);
+                tasks.appendChild(row);
+            }
+        }
+
+        button.onclick = () => {
+            const SpeechRecognition =
+                window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                status.innerText =
+                    "Voice recognition is not supported in this browser.";
+                return;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.lang = "en-US";
+
+            status.innerText = "Listening...";
+            recognition.start();
+
+            recognition.onresult = async (event) => {
+                const text = event.results[0][0].transcript;
+
+                status.innerText = "Thinking...";
+
+                const response = await fetch("/capture", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({text: text})
+                });
+
+                const result = await response.json();
+
+                status.innerText = "✓ " + result.task;
+
+                loadTasks();
+            };
+        };
+
+        loadTasks();
+    </script>
+</body>
+</html>
+"""
+def home():
+    return """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Remy</title>
 </head>
 <body style="font-family: sans-serif; text-align: center; padding: 40px;">
     <h1>Remy</h1>
