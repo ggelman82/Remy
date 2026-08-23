@@ -1,6 +1,9 @@
 import os
 import json
 import sqlite3
+import gspread
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
@@ -11,7 +14,9 @@ app = FastAPI()
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 DB_FILE = "remy.db"
-
+def get_sheet():
+    gc = gspread.service_account(filename="google-service-account.json")
+    return gc.open("Remy Tasks").sheet1
 
 def setup_database():
     conn = sqlite3.connect(DB_FILE)
@@ -233,8 +238,28 @@ Return ONLY valid JSON in this format:
         ),
     )
     item_id = cursor.lastrowid
+
+    created_at = conn.execute(
+        "SELECT created_at FROM items WHERE id = ?",
+        (item_id,)
+    ).fetchone()[0]
+
     conn.commit()
     conn.close()
+
+    sheet = get_sheet()
+    sheet.append_row([
+        item_id,
+        created_at,
+        capture.text,
+        item["task"],
+        item["details"],
+        item["intent"],
+        "open",
+        "",
+        item["needs_research"],
+        item["needs_email_draft"],
+    ])
 
     item["id"] = item_id
     item["status"] = "open"
@@ -244,22 +269,45 @@ Return ONLY valid JSON in this format:
 
 @app.get("/items")
 def get_items():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT * FROM items WHERE status = 'open' ORDER BY id DESC"
-    ).fetchall()
-    conn.close()
+    sheet = get_sheet()
+    rows = sheet.get_all_records()
 
-    return [dict(row) for row in rows]
+    open_items = []
+
+    for row in rows:
+        if str(row["Status"]).lower() == "open":
+            open_items.append({
+                "id": row["ID"],
+                "created_at": row["Created"],
+                "raw_text": row["Raw Text"],
+                "task": row["Task"],
+                "details": row["Details"],
+                "intent": row["Intent"],
+                "status": row["Status"],
+                "completed": row["Completed"],
+                "needs_research": row["Needs Research"],
+                "needs_email_draft": row["Needs Email Draft"],
+            })
+
+    return list(reversed(open_items))
 @app.post("/items/{item_id}/complete")
 def complete_item(item_id: int):
-    conn = sqlite3.connect(DB_FILE)
-    conn.execute(
-        "UPDATE items SET status = 'done' WHERE id = ?",
-        (item_id,)
-    )
-    conn.commit()
-    conn.close()
+    sheet = get_sheet()
+    rows = sheet.get_all_records()
 
-    return {"id": item_id, "status": "done"}
+    completed_at = datetime.now(
+        ZoneInfo("America/New_York")
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+    for index, row in enumerate(rows, start=2):
+        if str(row["ID"]) == str(item_id):
+            sheet.update_cell(index, 7, "done")
+            sheet.update_cell(index, 8, completed_at)
+
+            return {
+                "id": item_id,
+                "status": "done",
+                "completed": completed_at,
+            }
+
+    return {"error": "Item not found"}
