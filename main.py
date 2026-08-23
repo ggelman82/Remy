@@ -221,33 +221,22 @@ Return ONLY valid JSON in this format:
 
     item = json.loads(result)
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.execute(
-        """
-        INSERT INTO items
-        (raw_text, intent, task, details, needs_research, needs_email_draft)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            capture.text,
-            item["intent"],
-            item["task"],
-            item["details"],
-            int(item["needs_research"]),
-            int(item["needs_email_draft"]),
-        ),
-    )
-    item_id = cursor.lastrowid
-
-    created_at = conn.execute(
-        "SELECT created_at FROM items WHERE id = ?",
-        (item_id,)
-    ).fetchone()[0]
-
-    conn.commit()
-    conn.close()
-
     sheet = get_sheet()
+    rows = sheet.get_all_records()
+
+    existing_ids = []
+
+    for row in rows:
+        try:
+            existing_ids.append(int(row["ID"]))
+        except (ValueError, TypeError):
+            pass
+
+    item_id = max(existing_ids, default=0) + 1
+
+    created_at = datetime.now(
+        ZoneInfo("America/New_York")
+    ).strftime("%Y-%m-%d %H:%M:%S")
     sheet.append_row([
         item_id,
         created_at,
