@@ -114,3 +114,14 @@ def get_items():
     conn.close()
 
     return [dict(row) for row in rows]
+@app.post("/items/{item_id}/complete")
+def complete_item(item_id: int):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute(
+        "UPDATE items SET status = 'done' WHERE id = ?",
+        (item_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    return {"id": item_id, "status": "done"}
