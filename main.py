@@ -354,3 +354,90 @@ def get_completed_items():
             })
 
     return list(reversed(completed_items))
+@app.get("/digest")
+def get_digest():
+    sheet = get_sheet()
+    rows = sheet.get_all_records()
+
+    now = datetime.now(ZoneInfo("America/New_York"))
+    now_naive = now.replace(tzinfo=None)
+
+    open_items = []
+    recently_completed = []
+
+    for row in rows:
+        status = str(row["Status"]).lower()
+
+        if status == "open":
+            open_items.append(row)
+
+        elif status == "done" and row["Completed"]:
+            try:
+                completed_at = datetime.strptime(
+                    str(row["Completed"]),
+                    "%Y-%m-%d %H:%M:%S"
+                )
+
+                hours_ago = (
+                    now_naive - completed_at
+                ).total_seconds() / 3600
+
+                if 0 <= hours_ago <= 24:
+                    recently_completed.append(row)
+
+            except ValueError:
+                pass
+
+    context = {
+        "current_datetime": now.strftime("%Y-%m-%d %H:%M"),
+        "open_items": open_items,
+        "completed_last_24_hours": recently_completed,
+    }
+
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1200,
+        system="""
+You are Remy, an excellent executive assistant.
+
+Create a concise daily task briefing from the supplied task data.
+
+Rules:
+- Do not invent tasks, deadlines, facts, or completed work.
+- Prioritize what appears time-sensitive or important.
+- Interpret relative dates such as "tomorrow" relative to the item's Created timestamp.
+- Do not simply repeat the database.
+- Combine closely related items when useful.
+- Call attention to tasks that need research or an email draft.
+- Recently completed work should be acknowledged briefly, not dominate the briefing.
+- If a task is vague, say what clarification or next action would make it actionable.
+- An open item represents work that has NOT been completed yet.
+- Treat the Task field as an instruction or desired action, not evidence that the action already happened.
+- Never say something was sent, scheduled, set, researched, drafted, contacted, or otherwise completed unless the data explicitly shows it as completed.
+- If an open task says "Set a reminder...", describe the action as "Set a reminder...", not "the reminder is set."
+
+Use these sections when relevant:
+
+## Focus
+The most important things to act on.
+
+## Other open loops
+Remaining actionable work.
+
+## Needs preparation
+Research, email drafting, or other work Remy could help prepare.
+
+## Recently completed
+A short summary of meaningful completions.
+
+Keep the whole briefing useful, compact, and easy to scan.
+""",
+        messages=[
+            {
+                "role": "user",
+                "content": json.dumps(context, default=str)
+            }
+        ],
+    )
+
+    return {"digest": response.content[0].text}
