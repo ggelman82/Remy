@@ -1,22 +1,36 @@
 import os
 import json
 import sqlite3
+import hashlib
+import hmac
 import gspread
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from anthropic import Anthropic
 
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
+REMY_PASSWORD = os.environ.get("REMY_PASSWORD", "")
+REMY_DIGEST_TOKEN = os.environ.get("REMY_DIGEST_TOKEN", "")
+AUTH_COOKIE_NAME = "remy_auth"
+AUTH_COOKIE_VALUE = (
+    hashlib.sha256(("remy-session:" + REMY_PASSWORD).encode()).hexdigest()
+    if REMY_PASSWORD
+    else ""
+)
+
 DB_FILE = "remy.db"
+
+
 def get_sheet():
     gc = gspread.service_account(filename="google-service-account.json")
     return gc.open("Remy Tasks").sheet1
+
 
 def setup_database():
     conn = sqlite3.connect(DB_FILE)
@@ -39,12 +53,123 @@ def setup_database():
 
 setup_database()
 
+
 class Capture(BaseModel):
     text: str
 
 
+def has_web_auth(request: Request):
+    if not AUTH_COOKIE_VALUE:
+        return False
+    supplied = request.cookies.get(AUTH_COOKIE_NAME, "")
+    return bool(supplied) and hmac.compare_digest(supplied, AUTH_COOKIE_VALUE)
+
+
+def require_web_auth(request: Request):
+    if not has_web_auth(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def has_digest_auth(request: Request):
+    if not REMY_DIGEST_TOKEN:
+        return False
+    supplied = request.headers.get("X-Remy-Token", "")
+    return bool(supplied) and hmac.compare_digest(supplied, REMY_DIGEST_TOKEN)
+
+
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Remy Login</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 420px;
+            margin: 70px auto;
+            padding: 24px;
+        }
+        h1 { text-align: center; }
+        input, button {
+            box-sizing: border-box;
+            width: 100%;
+            font-size: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            margin-top: 12px;
+        }
+        #error { color: #b00020; text-align: center; min-height: 24px; }
+    </style>
+</head>
+<body>
+    <h1>Remy</h1>
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="login">Unlock</button>
+    <p id="error"></p>
+    <script>
+        const password = document.getElementById("password");
+        const button = document.getElementById("login");
+        const error = document.getElementById("error");
+
+        async function login() {
+            error.innerText = "";
+            const response = await fetch("/login", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({password: password.value})
+            });
+
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                error.innerText = "Incorrect password";
+                password.select();
+            }
+        }
+
+        button.onclick = login;
+        password.onkeydown = (event) => {
+            if (event.key === "Enter") login();
+        };
+        password.focus();
+    </script>
+</body>
+</html>
+"""
+
+
+@app.post("/login")
+async def login(request: Request):
+    if not REMY_PASSWORD:
+        raise HTTPException(status_code=503, detail="Remy password is not configured")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid login request")
+
+    supplied = str(body.get("password", ""))
+    if not hmac.compare_digest(supplied, REMY_PASSWORD):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=AUTH_COOKIE_VALUE,
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
-def home():
+def home(request: Request):
+    if not has_web_auth(request):
+        return HTMLResponse(LOGIN_HTML)
+
     return """
 <!DOCTYPE html>
 <html>
@@ -116,7 +241,8 @@ def home():
         const button = document.getElementById("talk");
         const status = document.getElementById("status");
         const tasks = document.getElementById("tasks");
-const completed = document.getElementById("completed");
+        const completed = document.getElementById("completed");
+
         async function loadTasks() {
             const response = await fetch("/items");
             const items = await response.json();
@@ -144,41 +270,42 @@ const completed = document.getElementById("completed");
                     });
 
                     loadTasks();
+                    loadCompleted();
                 };
- 
 
                 row.appendChild(checkbox);
                 row.appendChild(label);
                 tasks.appendChild(row);
             }
         }
-                       async function loadCompleted() {
-    const response = await fetch("/completed");
-    const items = await response.json();
 
-    completed.innerHTML = "";
+        async function loadCompleted() {
+            const response = await fetch("/completed");
+            const items = await response.json();
 
-    if (items.length === 0) {
-        completed.innerHTML = "<p>No completed items yet.</p>";
-        return;
-    }
+            completed.innerHTML = "";
 
-    for (const item of items) {
-        const row = document.createElement("div");
-        row.className = "task";
+            if (items.length === 0) {
+                completed.innerHTML = "<p>No completed items yet.</p>";
+                return;
+            }
 
-        const label = document.createElement("span");
+            for (const item of items) {
+                const row = document.createElement("div");
+                row.className = "task";
 
-        if (item.completed) {
-            label.innerText = item.task + " — " + item.completed;
-        } else {
-            label.innerText = item.task;
+                const label = document.createElement("span");
+
+                if (item.completed) {
+                    label.innerText = item.task + " — " + item.completed;
+                } else {
+                    label.innerText = item.task;
+                }
+
+                row.appendChild(label);
+                completed.appendChild(row);
+            }
         }
-
-        row.appendChild(label);
-        completed.appendChild(row);
-    }
-}
 
         button.onclick = () => {
             const SpeechRecognition =
@@ -218,13 +345,17 @@ const completed = document.getElementById("completed");
         };
 
         loadTasks();
-loadCompleted();
+        loadCompleted();
     </script>
 </body>
 </html>
 """
+
+
 @app.post("/capture")
-def capture(capture: Capture):
+def capture(capture: Capture, request: Request):
+    require_web_auth(request)
+
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=500,
@@ -294,7 +425,9 @@ Return ONLY valid JSON in this format:
 
 
 @app.get("/items")
-def get_items():
+def get_items(request: Request):
+    require_web_auth(request)
+
     sheet = get_sheet()
     rows = sheet.get_all_records()
 
@@ -316,8 +449,12 @@ def get_items():
             })
 
     return list(reversed(open_items))
+
+
 @app.post("/items/{item_id}/complete")
-def complete_item(item_id: int):
+def complete_item(item_id: int, request: Request):
+    require_web_auth(request)
+
     sheet = get_sheet()
     rows = sheet.get_all_records()
 
@@ -337,8 +474,12 @@ def complete_item(item_id: int):
             }
 
     return {"error": "Item not found"}
+
+
 @app.get("/completed")
-def get_completed_items():
+def get_completed_items(request: Request):
+    require_web_auth(request)
+
     sheet = get_sheet()
     rows = sheet.get_all_records()
 
@@ -354,8 +495,13 @@ def get_completed_items():
             })
 
     return list(reversed(completed_items))
+
+
 @app.get("/digest")
-def get_digest():
+def get_digest(request: Request):
+    if not (has_web_auth(request) or has_digest_auth(request)):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     sheet = get_sheet()
     rows = sheet.get_all_records()
 
