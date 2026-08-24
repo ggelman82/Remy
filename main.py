@@ -103,12 +103,20 @@ def home():
 
     <h2>To Do</h2>
     <div id="tasks">Loading...</div>
+<details style="margin-top: 30px;">
+    <summary style="font-size: 22px; font-weight: bold; cursor: pointer;">
+        Completed
+    </summary>
 
+    <div id="completed" style="margin-top: 12px;">
+        Loading...
+    </div>
+</details>
     <script>
         const button = document.getElementById("talk");
         const status = document.getElementById("status");
         const tasks = document.getElementById("tasks");
-
+const completed = document.getElementById("completed");
         async function loadTasks() {
             const response = await fetch("/items");
             const items = await response.json();
@@ -137,12 +145,40 @@ def home():
 
                     loadTasks();
                 };
+ 
 
                 row.appendChild(checkbox);
                 row.appendChild(label);
                 tasks.appendChild(row);
             }
         }
+                       async function loadCompleted() {
+    const response = await fetch("/completed");
+    const items = await response.json();
+
+    completed.innerHTML = "";
+
+    if (items.length === 0) {
+        completed.innerHTML = "<p>No completed items yet.</p>";
+        return;
+    }
+
+    for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "task";
+
+        const label = document.createElement("span");
+
+        if (item.completed) {
+            label.innerText = item.task + " — " + item.completed;
+        } else {
+            label.innerText = item.task;
+        }
+
+        row.appendChild(label);
+        completed.appendChild(row);
+    }
+}
 
         button.onclick = () => {
             const SpeechRecognition =
@@ -182,6 +218,7 @@ def home():
         };
 
         loadTasks();
+loadCompleted();
     </script>
 </body>
 </html>
@@ -300,3 +337,20 @@ def complete_item(item_id: int):
             }
 
     return {"error": "Item not found"}
+@app.get("/completed")
+def get_completed_items():
+    sheet = get_sheet()
+    rows = sheet.get_all_records()
+
+    completed_items = []
+
+    for row in rows:
+        if str(row["Status"]).lower() == "done":
+            completed_items.append({
+                "id": row["ID"],
+                "task": row["Task"],
+                "details": row["Details"],
+                "completed": row["Completed"],
+            })
+
+    return list(reversed(completed_items))
