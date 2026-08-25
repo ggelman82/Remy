@@ -28,7 +28,17 @@ DB_FILE = "remy.db"
 
 
 def get_sheet():
-    gc = gspread.service_account(filename="google-service-account.json")
+    if os.path.exists("google-service-account.json"):
+        gc = gspread.service_account(filename="google-service-account.json")
+    else:
+        credentials, _ = google.auth.default(
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ]
+        )
+        gc = gspread.authorize(credentials)
+
     return gc.open("Remy Tasks").sheet1
 
 
