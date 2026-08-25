@@ -3,6 +3,7 @@ import json
 import sqlite3
 import hashlib
 import hmac
+import gspread
 import google.auth
 from datetime import datetime
 from zoneinfo import ZoneInfo
