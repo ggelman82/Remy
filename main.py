@@ -9,11 +9,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from anthropic import Anthropic
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 REMY_PASSWORD = os.environ.get("REMY_PASSWORD", "")
@@ -67,6 +70,11 @@ setup_database()
 
 class Capture(BaseModel):
     text: str
+
+
+class ItemUpdate(BaseModel):
+    task: str
+    details: str = ""
 
 
 def has_web_auth(request: Request):
@@ -186,46 +194,198 @@ def home(request: Request):
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#5b4fd6">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <title>Remy</title>
     <style>
+        :root {
+            color-scheme: light;
+            --ink: #24223a;
+            --muted: #6b6880;
+            --surface: #ffffff;
+            --soft: #f3f1ff;
+            --line: #dedbea;
+            --primary: #5b4fd6;
+            --primary-dark: #4438b8;
+            --danger: #b42318;
+        }
+
+        * { box-sizing: border-box; }
+
         body {
-            font-family: sans-serif;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--ink);
+            background: #faf9ff;
             max-width: 600px;
             margin: auto;
-            padding: 24px;
+            padding: 20px 18px 48px;
         }
 
         h1 {
             text-align: center;
+            margin: 6px 0 20px;
+            color: var(--primary-dark);
         }
 
-        #talk {
-            display: block;
-            width: 100%;
-            font-size: 28px;
-            padding: 24px;
+        button, textarea { font: inherit; }
+
+        .capture-card {
+            padding: 16px;
+            border: 1px solid var(--line);
             border-radius: 18px;
-            margin-bottom: 18px;
+            background: var(--surface);
+            box-shadow: 0 6px 24px rgba(52, 43, 115, 0.08);
+        }
+
+        #typed-entry {
+            width: 100%;
+            min-height: 90px;
+            resize: vertical;
+            padding: 13px 14px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            color: var(--ink);
+            background: #fff;
+        }
+
+        #typed-entry:focus {
+            outline: 3px solid rgba(91, 79, 214, 0.16);
+            border-color: var(--primary);
+        }
+
+        .capture-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .primary-button, .secondary-button, #install {
+            border: 0;
+            border-radius: 12px;
+            padding: 13px 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .primary-button {
+            color: white;
+            background: var(--primary);
+        }
+
+        .primary-button:hover { background: var(--primary-dark); }
+
+        .secondary-button {
+            color: var(--primary-dark);
+            background: var(--soft);
+        }
+
+        button:disabled { opacity: .55; cursor: wait; }
+
+        #install {
+            display: none;
+            width: 100%;
+            margin-top: 12px;
+            color: var(--primary-dark);
+            border: 1px solid var(--line);
+            background: white;
         }
 
         #status {
             text-align: center;
-            min-height: 30px;
+            min-height: 24px;
+            margin: 12px 0 4px;
+            color: var(--muted);
         }
 
         .task {
-            display: flex;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
             gap: 12px;
-            align-items: flex-start;
-            padding: 16px 4px;
-            border-bottom: 1px solid #ddd;
-            font-size: 20px;
+            align-items: start;
+            padding: 15px 4px;
+            border-bottom: 1px solid var(--line);
+            font-size: 18px;
         }
 
-        .task input {
+        .task-checkbox {
             width: 24px;
             height: 24px;
             margin-top: 2px;
+            accent-color: var(--primary);
+        }
+
+        .task-copy { min-width: 0; }
+        .task-title { overflow-wrap: anywhere; }
+
+        .task-details {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 14px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .task-actions { display: flex; gap: 5px; }
+
+        .icon-button {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border: 0;
+            border-radius: 10px;
+            color: var(--muted);
+            background: transparent;
+            cursor: pointer;
+            font-size: 19px;
+        }
+
+        .icon-button:hover { background: var(--soft); }
+        .delete-button:hover { color: var(--danger); background: #fff0ee; }
+
+        .empty { color: var(--muted); }
+
+        details { margin-top: 30px; }
+        summary { font-size: 21px; font-weight: 700; cursor: pointer; }
+
+        dialog {
+            width: min(520px, calc(100% - 30px));
+            border: 0;
+            border-radius: 18px;
+            padding: 20px;
+            color: var(--ink);
+            box-shadow: 0 20px 60px rgba(25, 20, 65, .28);
+        }
+
+        dialog::backdrop { background: rgba(25, 20, 50, .48); }
+
+        dialog label {
+            display: block;
+            margin: 12px 0 6px;
+            font-weight: 700;
+        }
+
+        dialog input, dialog textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+        }
+
+        #edit-details { min-height: 100px; resize: vertical; }
+
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        @media (max-width: 420px) {
+            .capture-actions { grid-template-columns: 1fr; }
+            .task { grid-template-columns: auto 1fr; }
+            .task-actions { grid-column: 2; }
         }
     </style>
 </head>
@@ -233,92 +393,200 @@ def home(request: Request):
 <body>
     <h1>Remy</h1>
 
-    <button id="talk">🎙️ Talk to Remy</button>
+    <section class="capture-card" aria-label="Add a task">
+        <textarea id="typed-entry" placeholder="Type something for Remy..." maxlength="5000"></textarea>
+        <div class="capture-actions">
+            <button id="add" class="primary-button">Add item</button>
+            <button id="talk" class="secondary-button">🎙️ Talk to Remy</button>
+        </div>
+    </section>
 
-    <p id="status"></p>
+    <button id="install">Install Remy on this device</button>
+
+    <p id="status" role="status" aria-live="polite"></p>
 
     <h2>To Do</h2>
     <div id="tasks">Loading...</div>
-<details style="margin-top: 30px;">
-    <summary style="font-size: 22px; font-weight: bold; cursor: pointer;">
-        Completed
-    </summary>
+    <details>
+        <summary>Completed</summary>
+        <div id="completed">Loading...</div>
+    </details>
 
-    <div id="completed" style="margin-top: 12px;">
-        Loading...
-    </div>
-</details>
+    <dialog id="edit-dialog">
+        <form id="edit-form">
+            <h2>Edit item</h2>
+            <label for="edit-task">Task</label>
+            <input id="edit-task" maxlength="500" required>
+            <label for="edit-details">Details</label>
+            <textarea id="edit-details" maxlength="5000"></textarea>
+            <div class="dialog-actions">
+                <button type="button" id="edit-cancel" class="secondary-button">Cancel</button>
+                <button type="submit" class="primary-button">Save</button>
+            </div>
+        </form>
+    </dialog>
+
     <script>
-        const button = document.getElementById("talk");
+        const talkButton = document.getElementById("talk");
+        const addButton = document.getElementById("add");
+        const typedEntry = document.getElementById("typed-entry");
         const status = document.getElementById("status");
         const tasks = document.getElementById("tasks");
         const completed = document.getElementById("completed");
+        const editDialog = document.getElementById("edit-dialog");
+        const editForm = document.getElementById("edit-form");
+        const editTask = document.getElementById("edit-task");
+        const editDetails = document.getElementById("edit-details");
+        const installButton = document.getElementById("install");
+        let editingId = null;
+        let installPrompt = null;
 
-        async function loadTasks() {
-            const response = await fetch("/items");
-            const items = await response.json();
-
-            tasks.innerHTML = "";
-
-            if (items.length === 0) {
-                tasks.innerHTML = "<p>Nothing to do. 🎉</p>";
-                return;
+        async function api(url, options = {}) {
+            const response = await fetch(url, options);
+            let result = {};
+            try { result = await response.json(); } catch (_) {}
+            if (response.status === 401) {
+                window.location.reload();
+                throw new Error("Please unlock Remy again.");
             }
+            if (!response.ok) {
+                throw new Error(result.detail || result.error || "Something went wrong.");
+            }
+            return result;
+        }
 
-            for (const item of items) {
-                const row = document.createElement("div");
-                row.className = "task";
+        function makeIconButton(icon, label, className, handler) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "icon-button " + (className || "");
+            button.innerText = icon;
+            button.setAttribute("aria-label", label);
+            button.title = label;
+            button.onclick = handler;
+            return button;
+        }
 
+        function renderTask(item, isCompleted = false) {
+            const row = document.createElement("div");
+            row.className = "task";
+
+            if (!isCompleted) {
                 const checkbox = document.createElement("input");
                 checkbox.type = "checkbox";
-
-                const label = document.createElement("span");
-                label.innerText = item.task;
-
+                checkbox.className = "task-checkbox";
+                checkbox.setAttribute("aria-label", `Mark ${item.task} done`);
                 checkbox.onchange = async () => {
-                    await fetch(`/items/${item.id}/complete`, {
-                        method: "POST"
-                    });
-
-                    loadTasks();
-                    loadCompleted();
+                    checkbox.disabled = true;
+                    try {
+                        await api(`/items/${item.id}/complete`, {method: "POST"});
+                        await Promise.all([loadTasks(), loadCompleted()]);
+                    } catch (error) {
+                        checkbox.checked = false;
+                        checkbox.disabled = false;
+                        status.innerText = error.message;
+                    }
                 };
-
                 row.appendChild(checkbox);
-                row.appendChild(label);
-                tasks.appendChild(row);
+            } else {
+                const spacer = document.createElement("span");
+                spacer.innerText = "✓";
+                spacer.style.color = "var(--primary)";
+                row.appendChild(spacer);
+            }
+
+            const copy = document.createElement("div");
+            copy.className = "task-copy";
+            const title = document.createElement("div");
+            title.className = "task-title";
+            title.innerText = item.task;
+            copy.appendChild(title);
+
+            if (item.details) {
+                const details = document.createElement("div");
+                details.className = "task-details";
+                details.innerText = item.details;
+                copy.appendChild(details);
+            }
+            if (isCompleted && item.completed) {
+                const date = document.createElement("div");
+                date.className = "task-details";
+                date.innerText = "Completed " + item.completed;
+                copy.appendChild(date);
+            }
+            row.appendChild(copy);
+
+            const actions = document.createElement("div");
+            actions.className = "task-actions";
+            actions.appendChild(makeIconButton("✏️", "Edit item", "", () => openEdit(item)));
+            actions.appendChild(makeIconButton("🗑️", "Delete item", "delete-button", () => deleteItem(item)));
+            row.appendChild(actions);
+
+            return row;
+        }
+
+        async function loadTasks() {
+            try {
+                const items = await api("/items");
+                tasks.innerHTML = "";
+                if (items.length === 0) {
+                    tasks.innerHTML = '<p class="empty">Nothing to do. 🎉</p>';
+                    return;
+                }
+                for (const item of items) tasks.appendChild(renderTask(item));
+            } catch (error) {
+                tasks.innerHTML = `<p class="empty">${error.message}</p>`;
             }
         }
 
         async function loadCompleted() {
-            const response = await fetch("/completed");
-            const items = await response.json();
-
-            completed.innerHTML = "";
-
-            if (items.length === 0) {
-                completed.innerHTML = "<p>No completed items yet.</p>";
-                return;
-            }
-
-            for (const item of items) {
-                const row = document.createElement("div");
-                row.className = "task";
-
-                const label = document.createElement("span");
-
-                if (item.completed) {
-                    label.innerText = item.task + " — " + item.completed;
-                } else {
-                    label.innerText = item.task;
+            try {
+                const items = await api("/completed");
+                completed.innerHTML = "";
+                if (items.length === 0) {
+                    completed.innerHTML = '<p class="empty">No completed items yet.</p>';
+                    return;
                 }
-
-                row.appendChild(label);
-                completed.appendChild(row);
+                for (const item of items) completed.appendChild(renderTask(item, true));
+            } catch (error) {
+                completed.innerHTML = `<p class="empty">${error.message}</p>`;
             }
         }
 
-        button.onclick = () => {
+        async function submitCapture(text) {
+            text = text.trim();
+            if (!text) {
+                typedEntry.focus();
+                return;
+            }
+            addButton.disabled = true;
+            talkButton.disabled = true;
+            status.innerText = "Thinking...";
+            try {
+                const result = await api("/capture", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({text})
+                });
+                typedEntry.value = "";
+                status.innerText = "✓ " + result.task;
+                await loadTasks();
+            } catch (error) {
+                status.innerText = error.message;
+            } finally {
+                addButton.disabled = false;
+                talkButton.disabled = false;
+            }
+        }
+
+        addButton.onclick = () => submitCapture(typedEntry.value);
+        typedEntry.onkeydown = (event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submitCapture(typedEntry.value);
+            }
+        };
+
+        talkButton.onclick = () => {
             const SpeechRecognition =
                 window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -334,26 +602,74 @@ def home(request: Request):
             status.innerText = "Listening...";
             recognition.start();
 
-            recognition.onresult = async (event) => {
+            recognition.onresult = (event) => {
                 const text = event.results[0][0].transcript;
-
-                status.innerText = "Thinking...";
-
-                const response = await fetch("/capture", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({text: text})
-                });
-
-                const result = await response.json();
-
-                status.innerText = "✓ " + result.task;
-
-                loadTasks();
+                typedEntry.value = text;
+                submitCapture(text);
+            };
+            recognition.onerror = () => {
+                status.innerText = "I could not hear that. Please try again or type it.";
             };
         };
+
+        function openEdit(item) {
+            editingId = item.id;
+            editTask.value = item.task || "";
+            editDetails.value = item.details || "";
+            editDialog.showModal();
+            editTask.focus();
+        }
+
+        document.getElementById("edit-cancel").onclick = () => editDialog.close();
+        editForm.onsubmit = async (event) => {
+            event.preventDefault();
+            const task = editTask.value.trim();
+            if (!task) return;
+            try {
+                await api(`/items/${editingId}`, {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({task, details: editDetails.value.trim()})
+                });
+                editDialog.close();
+                status.innerText = "✓ Item updated";
+                await Promise.all([loadTasks(), loadCompleted()]);
+            } catch (error) {
+                status.innerText = error.message;
+            }
+        };
+
+        async function deleteItem(item) {
+            if (!window.confirm(`Delete “${item.task}” permanently?`)) return;
+            try {
+                await api(`/items/${item.id}`, {method: "DELETE"});
+                status.innerText = "Item deleted";
+                await Promise.all([loadTasks(), loadCompleted()]);
+            } catch (error) {
+                status.innerText = error.message;
+            }
+        }
+
+        window.addEventListener("beforeinstallprompt", (event) => {
+            event.preventDefault();
+            installPrompt = event;
+            installButton.style.display = "block";
+        });
+        installButton.onclick = async () => {
+            if (!installPrompt) return;
+            installPrompt.prompt();
+            await installPrompt.userChoice;
+            installPrompt = null;
+            installButton.style.display = "none";
+        };
+        window.addEventListener("appinstalled", () => {
+            status.innerText = "Remy installed";
+            installButton.style.display = "none";
+        });
+
+        if ("serviceWorker" in navigator) {
+            window.addEventListener("load", () => navigator.serviceWorker.register("/service-worker.js"));
+        }
 
         loadTasks();
         loadCompleted();
@@ -363,9 +679,87 @@ def home(request: Request):
 """
 
 
+@app.get("/manifest.webmanifest")
+def manifest():
+    return JSONResponse(
+        {
+            "name": "Remy",
+            "short_name": "Remy",
+            "description": "Private voice and typed task capture",
+            "id": "/",
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "background_color": "#faf9ff",
+            "theme_color": "#5b4fd6",
+            "icons": [
+                {
+                    "src": "/static/icon-192.png",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
+                    "src": "/static/icon-512.png",
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "any maskable",
+                }
+            ],
+        },
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/icon.svg")
+def icon():
+    return Response(
+        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="112" fill="#5b4fd6"/>
+<circle cx="256" cy="256" r="150" fill="#ffffff" opacity=".14"/>
+<path fill="#fff" d="M142 130h121c78 0 127 39 127 105 0 43-23 75-63 92l71 85h-94l-58-72h-28v72h-76V130zm76 65v81h42c35 0 53-14 53-41 0-27-18-40-53-40h-42z"/>
+</svg>""",
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/service-worker.js")
+def service_worker():
+    return Response(
+        """const CACHE = "remy-shell-v1";
+self.addEventListener("install", event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(["/manifest.webmanifest", "/icon.svg", "/static/icon-192.png", "/static/icon-512.png"])));
+  self.skipWaiting();
+});
+self.addEventListener("activate", event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))));
+  self.clients.claim();
+});
+self.addEventListener("fetch", event => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+  if (url.pathname === "/manifest.webmanifest" || url.pathname === "/icon.svg" || url.pathname.startsWith("/static/")) {
+    event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+  }
+});""",
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
 @app.post("/capture")
 def capture(capture: Capture, request: Request):
     require_web_auth(request)
+
+    capture_text = capture.text.strip()
+    if not capture_text:
+        raise HTTPException(status_code=400, detail="Please enter something for Remy.")
+    if len(capture_text) > 5000:
+        raise HTTPException(status_code=400, detail="Please keep entries under 5,000 characters.")
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
@@ -388,7 +782,7 @@ Return ONLY valid JSON in this format:
 }
 """,
         messages=[
-            {"role": "user", "content": capture.text}
+            {"role": "user", "content": capture_text}
         ],
     )
 
@@ -419,7 +813,7 @@ Return ONLY valid JSON in this format:
     sheet.append_row([
         item_id,
         created_at,
-        capture.text,
+        capture_text,
         item["task"],
         item["details"],
         item["intent"],
@@ -462,6 +856,49 @@ def get_items(request: Request):
     return list(reversed(open_items))
 
 
+@app.put("/items/{item_id}")
+def update_item(item_id: int, update: ItemUpdate, request: Request):
+    require_web_auth(request)
+
+    task = update.task.strip()
+    details = update.details.strip()
+    if not task:
+        raise HTTPException(status_code=400, detail="Task cannot be empty.")
+    if len(task) > 500 or len(details) > 5000:
+        raise HTTPException(status_code=400, detail="The edited item is too long.")
+
+    sheet = get_sheet()
+    rows = sheet.get_all_records()
+
+    for index, row in enumerate(rows, start=2):
+        if str(row["ID"]) == str(item_id):
+            sheet.update_cell(index, 4, task)
+            sheet.update_cell(index, 5, details)
+            return {
+                "id": item_id,
+                "task": task,
+                "details": details,
+                "status": row["Status"],
+            }
+
+    raise HTTPException(status_code=404, detail="Item not found.")
+
+
+@app.delete("/items/{item_id}")
+def delete_item(item_id: int, request: Request):
+    require_web_auth(request)
+
+    sheet = get_sheet()
+    rows = sheet.get_all_records()
+
+    for index, row in enumerate(rows, start=2):
+        if str(row["ID"]) == str(item_id):
+            sheet.delete_rows(index)
+            return {"id": item_id, "deleted": True}
+
+    raise HTTPException(status_code=404, detail="Item not found.")
+
+
 @app.post("/items/{item_id}/complete")
 def complete_item(item_id: int, request: Request):
     require_web_auth(request)
@@ -484,7 +921,7 @@ def complete_item(item_id: int, request: Request):
                 "completed": completed_at,
             }
 
-    return {"error": "Item not found"}
+    raise HTTPException(status_code=404, detail="Item not found.")
 
 
 @app.get("/completed")
